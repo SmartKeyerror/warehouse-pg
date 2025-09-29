@@ -957,17 +957,18 @@ SELECT t1.c FROM t1 LEFT OUTER JOIN (select t3.*, t3.a+t3.b as cc from t3)t ON t
 -- Test for unexpected NLJ qual
 --
 explain select 1 as mrs_t1 where 1 <= ALL (select x from z);
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
- Nested Loop Left Anti Semi (Not-In) Join  (cost=0.00..882688.07 rows=1 width=1)
+                                                                                                                                                       QUERY PLAN                                                                                                                                                        
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Nested Loop  (cost=0.00..882688.11 rows=1 width=1)
    Join Filter: true
+   ->  Result  (cost=0.00..431.00 rows=1 width=1)
+         Filter: ((CASE WHEN (sum((CASE WHEN (1 > x) THEN 1 ELSE 0 END)) IS NULL) THEN true WHEN (sum((CASE WHEN (x IS NULL) THEN 1 ELSE 0 END)) > '0'::bigint) THEN NULL::boolean WHEN (1 IS NULL) THEN NULL::boolean WHEN (sum((CASE WHEN (1 > x) THEN 1 ELSE 0 END)) = '0'::bigint) THEN true ELSE false END) = true)
+         ->  Aggregate  (cost=0.00..431.00 rows=1 width=16)
+               ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..431.00 rows=1 width=8)
+                     ->  Seq Scan on z  (cost=0.00..431.00 rows=1 width=4)
    ->  Result  (cost=0.00..0.00 rows=1 width=1)
-   ->  Materialize  (cost=0.00..431.00 rows=1 width=1)
-         ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..431.00 rows=1 width=1)
-               ->  Seq Scan on z  (cost=0.00..431.00 rows=1 width=1)
-                     Filter: ((1 > x) IS DISTINCT FROM false)
- Optimizer: Pivotal Optimizer (GPORCA)
-(8 rows)
+ Optimizer: GPORCA
+(9 rows)
 
 --
 -- Test for wrong results in window functions under joins #1
@@ -3282,8 +3283,8 @@ INNER JOIN member_subgroup
 ON member_group.group_id = member_subgroup.group_id
 LEFT OUTER JOIN region
 ON (member_group.group_id IN (12,13,14,15) AND member_subgroup.subgroup_name = region.county_name);
-                                            QUERY PLAN                                             
----------------------------------------------------------------------------------------------------
+                                         QUERY PLAN                                          
+---------------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3)
    ->  Hash Left Join
          Hash Cond: (member_subgroup.subgroup_name = (region.county_name)::text)
@@ -3291,17 +3292,17 @@ ON (member_group.group_id IN (12,13,14,15) AND member_subgroup.subgroup_name = r
          ->  Redistribute Motion 3:3  (slice2; segments: 3)
                Hash Key: member_subgroup.subgroup_name
                ->  Hash Join
-                     Hash Cond: (member_group."group_id" = member."group_id")
-                     ->  Seq Scan on member_group
+                     Hash Cond: (member."group_id" = member_group."group_id")
+                     ->  Redistribute Motion 3:3  (slice3; segments: 3)
+                           Hash Key: member."group_id"
+                           ->  Hash Join
+                                 Hash Cond: (member."group_id" = member_subgroup."group_id")
+                                 ->  Seq Scan on member
+                                 ->  Hash
+                                       ->  Broadcast Motion 3:3  (slice4; segments: 3)
+                                             ->  Seq Scan on member_subgroup
                      ->  Hash
-                           ->  Redistribute Motion 3:3  (slice3; segments: 3)
-                                 Hash Key: member."group_id"
-                                 ->  Hash Join
-                                       Hash Cond: (member."group_id" = member_subgroup."group_id")
-                                       ->  Seq Scan on member
-                                       ->  Hash
-                                             ->  Broadcast Motion 3:3  (slice4; segments: 3)
-                                                   ->  Seq Scan on member_subgroup
+                           ->  Seq Scan on member_group
          ->  Hash
                ->  Redistribute Motion 3:3  (slice5; segments: 3)
                      Hash Key: region.county_name
@@ -3314,8 +3315,8 @@ CREATE TABLE coercejoin (a varchar(10), b varchar(10)) DISTRIBUTED BY (a);
 -- Positive test, the join should be colocated as the implicit cast from the
 -- parse rewrite is a relabeling (varchar::text).
 EXPLAIN (costs off) SELECT * FROM coercejoin a, coercejoin b WHERE a.a=b.a;
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3)
    ->  Hash Join
          Hash Cond: ((a.a)::text = (b.a)::text)
@@ -3329,8 +3330,8 @@ EXPLAIN (costs off) SELECT * FROM coercejoin a, coercejoin b WHERE a.a=b.a;
 -- which cannot guarantee that the coerced value would hash to the same segment
 -- as the uncoerced tuple.
 EXPLAIN (costs off) SELECT * FROM coercejoin a, coercejoin b WHERE a.a::numeric=b.a::numeric;
-                                 QUERY PLAN                                    
--------------------------------------------------------------------------------
+                            QUERY PLAN                            
+------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3)
    ->  Hash Join
          Hash Cond: ((a.a)::numeric = (b.a)::numeric)
@@ -4179,6 +4180,57 @@ select * from r_table2 where ra2 in ( select a from l_table join r_table1 on b =
    1 |   1
 (1 row)
 
+-- Testcase for hash join rescan clearing batch files for outer subplan
+truncate l_table;
+truncate r_table1;
+insert into l_table select i, i%100 from generate_series(1, 20000) i;
+insert into r_table1 select i%100, i from generate_series(1, 10000) i;
+insert into r_table1 select i%100, i from generate_series(1, 10000) i;
+analyze l_table;
+analyze r_table1;
+set statement_mem="1MB";
+explain analyze select * from r_table2 where ra2 in (select ra1 from l_table join r_table1 on b = rb1);
+                                                             QUERY PLAN                                                             
+------------------------------------------------------------------------------------------------------------------------------------
+ Gather Motion 1:1  (slice1; segments: 1)  (cost=1205.61..1205.61 rows=15 width=8) (actual time=12.856..12.859 rows=2 loops=1)
+   ->  Nested Loop Semi Join  (cost=473.00..1205.61 rows=15 width=8) (actual time=10.080..12.137 rows=2 loops=1)
+         Join Filter: (r_table2.ra2 = r_table1.ra1)
+         Rows Removed by Join Filter: 20
+         ->  Seq Scan on r_table2  (cost=0.00..1.02 rows=2 width=8) (actual time=0.023..0.024 rows=2 loops=1)
+         ->  Hash Join  (cost=473.00..1196.00 rows=40000 width=4) (actual time=5.019..5.724 rows=11 loops=2)
+               Hash Cond: (l_table.b = r_table1.rb1)
+               Extra Text: Work file set: 0 files (0 compressed), avg file size 0, compression buffer size 0 bytes.
+ 
+               ->  Seq Scan on l_table  (cost=0.00..223.00 rows=20000 width=4) (actual time=0.009..0.015 rows=6 loops=2)
+               ->  Hash  (cost=223.00..223.00 rows=20000 width=8) (actual time=9.849..9.849 rows=20000 loops=1)
+                     Buckets: 4096  Batches: 2  Memory Usage: 427kB
+                     ->  Seq Scan on r_table1  (cost=0.00..223.00 rows=20000 width=8) (actual time=0.021..4.116 rows=20000 loops=1)
+ Optimizer: Postgres-based planner
+ Planning Time: 0.475 ms
+   (slice0)    Executor memory: 44K bytes.
+ * (slice1)    Executor memory: 529K bytes (seg1).  Work_mem: 0K bytes max, 269K bytes wanted.
+ Memory used:  1024kB
+ Memory wanted:  868kB
+ Execution Time: 13.242 ms
+(20 rows)
+
+select * from r_table2 where ra2 in (select ra1 from l_table join r_table1 on b = rb1);
+ ra2 | rb2 
+-----+-----
+  11 |  11
+   1 |   1
+(2 rows)
+
+set gp_workfile_compression=on;
+select * from r_table2 where ra2 in (select ra1 from l_table join r_table1 on b = rb1);
+ ra2 | rb2 
+-----+-----
+  11 |  11
+   1 |   1
+(2 rows)
+
+reset gp_workfile_compression;
+reset statement_mem;
 reset optimizer;
 reset enable_nestloop;
 reset enable_bitmapscan;
@@ -4232,16 +4284,17 @@ set enable_nestloop to on;
 explain analyze select * from loops_table where x in (select i2 from outer_table join inner_table on o = i1);
                                                               QUERY PLAN                                                               
 ---------------------------------------------------------------------------------------------------------------------------------------
- Gather Motion 1:1  (slice1; segments: 1)  (cost=9104.32..9104.32 rows=19 width=4) (actual time=520.545..520.549 rows=8 loops=1)
-   ->  Nested Loop Semi Join  (cost=1181.00..9104.32 rows=19 width=4) (actual time=16.612..520.292 rows=8 loops=1)
+ Gather Motion 1:1  (slice1; segments: 1)  (cost=9118.60..9118.60 rows=19 width=4) (actual time=311.177..311.183 rows=8 loops=1)
+   ->  Nested Loop Semi Join  (cost=1181.00..9118.60 rows=19 width=4) (actual time=18.083..310.473 rows=8 loops=1)
          Join Filter: (loops_table.x = inner_table.i2)
-         Rows Removed by Join Filter: 1012155
-         ->  Seq Scan on loops_table  (cost=0.00..1.01 rows=1 width=4) (actual time=0.016..0.023 rows=8 loops=1)
-         ->  Hash Join  (cost=1181.00..8857.47 rows=549286 width=4) (actual time=2.072..53.426 rows=126520 loops=8)
+         Rows Removed by Join Filter: 1437555
+         ->  Seq Scan on loops_table  (cost=0.00..1.01 rows=1 width=4) (actual time=0.026..0.029 rows=8 loops=1)
+         ->  Hash Join  (cost=1181.00..8872.31 rows=550606 width=4) (actual time=2.255..31.530 rows=179695 loops=8)
                Hash Cond: (outer_table.o = inner_table.i1)
-               Extra Text: Work file set: 14 files (0 compressed), avg file size 220013, compression buffer size 0 bytes
-               ->  Seq Scan on outer_table  (cost=0.00..1222.00 rows=110000 width=4) (actual time=0.002..4.378 rows=41281 loops=8)
-               ->  Hash  (cost=556.00..556.00 rows=50000 width=8) (actual time=16.480..16.480 rows=50000 loops=1)
+               Extra Text: Work file set: 14 files (0 compressed), avg file size 220013, compression buffer size 0 bytes.
+ 
+               ->  Seq Scan on outer_table  (cost=0.00..1222.00 rows=110000 width=4) (actual time=0.002..2.578 rows=55018 loops=8)
+               ->  Hash  (cost=556.00..556.00 rows=50000 width=8) (actual time=17.896..17.897 rows=50000 loops=1)
                      Buckets: 4096  Batches: 8  Memory Usage: 277kB
                      ->  Seq Scan on inner_table  (cost=0.00..556.00 rows=50000 width=8) (actual time=0.019..5.010 rows=50000 loops=1)
  Optimizer: Postgres-based planner
@@ -4323,7 +4376,7 @@ explain (verbose, costs off) select 1
 from ot,
      foo(ot.i) as f
 join w on w.i = f.i;
-                                                   QUERY PLAN
+                                                   QUERY PLAN                                                   
 ----------------------------------------------------------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3)
    Output: 1
@@ -4441,14 +4494,14 @@ insert into big_table select generate_series(1, 10000);
 analyze big_table;
 analyze empty_table;
 explain select * from big_table, empty_table where s = i;
-                                  QUERY PLAN                                   
--------------------------------------------------------------------------------
- Gather Motion 1:1  (slice1; segments: 1)  (cost=0.00..863.96 rows=1 width=6)
-   ->  Hash Join  (cost=0.00..863.96 rows=3 width=6)
-         Hash Cond: ((big_table.s)::integer = empty_table.i)
-         ->  Seq Scan on big_table  (cost=0.00..431.18 rows=30000 width=2)
-         ->  Hash  (cost=431.00..431.00 rows=3 width=4)
-               ->  Seq Scan on empty_table  (cost=0.00..431.00 rows=3 width=4)
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
+ Gather Motion 1:1  (slice1; segments: 1)  (cost=0.00..863.67 rows=1 width=6)
+   ->  Hash Join  (cost=0.00..863.67 rows=3 width=6)
+         Hash Cond: (empty_table.i = (big_table.s)::integer)
+         ->  Seq Scan on empty_table  (cost=0.00..431.00 rows=3 width=4)
+         ->  Hash  (cost=431.18..431.18 rows=30000 width=2)
+               ->  Seq Scan on big_table  (cost=0.00..431.18 rows=30000 width=2)
  Optimizer: GPORCA
 (7 rows)
 
