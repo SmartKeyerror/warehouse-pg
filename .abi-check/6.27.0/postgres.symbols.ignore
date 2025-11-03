@@ -1,1 +1,4 @@
 ConfigureNamesInt_gp
+MainLWLockArray
+PgBackendStatus
+pgstat_fetch_stat_local_beentry
