@@ -2999,6 +2999,54 @@ fetch_single_dqa_info(PlannerInfo *root,
 												   dqa_group_exprs,
 												   num_total_input_rows,
 												   NULL);
+
+	/*
+	 * For SINGLE_DQA_WITHAGG, we need to ensure that Vars used by normal
+	 * aggregates (non-DISTINCT) are included in the input projection target.
+	 * Otherwise, partial aggregation in intermediate stages won't have access
+	 * to these columns. This is particularly important when normal aggregates
+	 * appear only in HAVING clause and not in SELECT list.
+	 */
+	if (ctx->type == SINGLE_DQA_WITHAGG && ctx->partial_grouping_target)
+	{
+		ListCell *lc;
+		foreach(lc, ctx->partial_grouping_target->exprs)
+		{
+			Node *expr = (Node *) lfirst(lc);
+
+			if (is_normal_agg(expr))
+			{
+				/* Extract Vars from the normal aggregate's arguments */
+				List *vars = pull_var_clause(expr,
+											 PVC_RECURSE_AGGREGATES |
+											 PVC_RECURSE_WINDOWFUNCS |
+											 PVC_RECURSE_PLACEHOLDERS);
+				ListCell *vlc;
+				foreach(vlc, vars)
+				{
+					Var *var = (Var *) lfirst(vlc);
+					bool found = false;
+					int idx = 0;
+					ListCell *tlc;
+
+					/* Check if this Var is already in input_proj_target */
+					foreach(tlc, info->input_proj_target->exprs)
+					{
+						if (equal(var, lfirst(tlc)))
+						{
+							found = true;
+							break;
+						}
+						idx++;
+					}
+
+					/* Add if not found */
+					if (!found)
+						add_column_to_pathtarget(info->input_proj_target, (Expr *) var, 0);
+				}
+			}
+		}
+	}
 }
 
 /*
