@@ -2831,16 +2831,63 @@ fetch_multi_dqas_info(PlannerInfo *root,
 	}
 
 	/*
+	 * For MULTI_DQAS_WITHAGG, ensure Vars from normal aggregates are in proj_target
+	 * before calling find_dqa_expr_by_normal_agg. This is important when normal
+	 * aggregates appear only in HAVING clause and not in SELECT list.
+	 */
+	if (ctx->type == MULTI_DQAS_WITHAGG)
+	{
+		foreach(lc, ctx->partial_grouping_target->exprs)
+		{
+			Node *expr = (Node *) lfirst(lc);
+
+			if (is_normal_agg(expr))
+			{
+				List *vars = pull_var_clause(expr,
+											 PVC_RECURSE_AGGREGATES |
+											 PVC_RECURSE_WINDOWFUNCS |
+											 PVC_RECURSE_PLACEHOLDERS);
+				ListCell *vlc;
+				foreach(vlc, vars)
+				{
+					Var *var = (Var *) lfirst(vlc);
+					bool found = false;
+					ListCell *tlc;
+
+					foreach(tlc, proj_target->exprs)
+					{
+						if (equal(var, lfirst(tlc)))
+						{
+							found = true;
+							break;
+						}
+					}
+
+					if (!found)
+					{
+						add_column_to_pathtarget(proj_target, (Expr *) var, 0);
+						if (proj_target->sortgrouprefs == NULL)
+							proj_target->sortgrouprefs = (Index *) palloc0(list_length(proj_target->exprs) * sizeof(Index));
+						else
+							proj_target->sortgrouprefs = (Index *) repalloc(proj_target->sortgrouprefs,
+																			list_length(proj_target->exprs) * sizeof(Index));
+					}
+				}
+			}
+		}
+	}
+
+	/*
 	 * Find DQAExpr for vars in normal agg, if not found
 	 * then use the first DQAExpr for these vars.
 	 *
 	 * select count(distinct a), count(distinct b), sum(b+e), sum(c+d) from t1;
 	 * 				|					|
 	 * 			DQAExpr_1			DQAExpr_2
-	 * 
+	 *
 	 * for sum(b+e), `b` is the distinct var in DQAExpr_2, so `b` and `e` will
 	 * be assinged to DQAExpr_2, also include sum(b+e)
-	 * 
+	 *
 	 * for sum(c+d), we could not find a DQAExpr for `c` and `d`, we just assign
 	 * these unrelated vars to DQAExpr_1
 	 */
