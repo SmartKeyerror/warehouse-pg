@@ -2381,6 +2381,18 @@ recognize_dqa_type(cdb_agg_planning_context *ctx)
 									   PVC_INCLUDE_AGGREGATES |
 									   PVC_INCLUDE_WINDOWFUNCS |
 									   PVC_INCLUDE_PLACEHOLDERS);
+		/*
+		 * Also check havingQual for non-DISTINCT aggregates.
+		 * Normal aggregates in HAVING clause also need special handling.
+		 */
+		if (ctx->havingQual)
+		{
+			List *having_aggs = pull_var_clause((Node *) ctx->havingQual,
+											   PVC_INCLUDE_AGGREGATES |
+											   PVC_INCLUDE_WINDOWFUNCS |
+											   PVC_INCLUDE_PLACEHOLDERS);
+			varnos = list_concat(varnos, having_aggs);
+		}
 		foreach (lc, varnos)
 		{
 			Node	   *node = lfirst(lc);
