@@ -103,6 +103,18 @@ CXformGbAggWithMDQA2Join::PexprMDQAs2Join(CMemoryPool *mp, CExpression *pexpr)
 	CColRefSet *pcrsChildOutput = pexprChild->DeriveOutputColumns();
 	CColRefArray *pdrgpcrChildOutput = pcrsChildOutput->Pdrgpcr(mp);
 
+	// Mark all child output columns as used before creating the CTE producer.
+	// PexprAddCTEProducer copies each column ref via PcrCopy, which propagates
+	// the EUsed status to the remapped copies inside the CTE.  Without this,
+	// CPhysicalCTEProducer::PcrsRequired pushes all CTE output columns as
+	// required down to the scan, but columns not referenced in any scalar
+	// expression remain EUnused, causing MakeDXLTableDescr to assert when it
+	// finds a required column it was about to prune.
+	for (ULONG ul = 0; ul < pdrgpcrChildOutput->Size(); ul++)
+	{
+		(*pdrgpcrChildOutput)[ul]->MarkAsUsed();
+	}
+
 	// create a CTE producer based on child expression
 	CCTEInfo *pcteinfo = COptCtxt::PoctxtFromTLS()->Pcteinfo();
 	const ULONG ulCTEId = pcteinfo->next_id();
