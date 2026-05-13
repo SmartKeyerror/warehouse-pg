@@ -6,11 +6,12 @@
 -- ---------------------------------------------------------------------------
 -- RAW type
 --
--- Oracle's RAW is a variable-length binary string.  We model it as a domain
--- over bytea so that all bytea operators and functions apply automatically.
+-- Oracle's RAW is a variable-length binary string.  We define it as a domain
+-- over bytea in the public schema so it is accessible without needing to
+-- add "oracle" to search_path.
 -- ---------------------------------------------------------------------------
 
-CREATE DOMAIN oracle.raw AS bytea;
+CREATE DOMAIN raw AS bytea;
 
 -- ---------------------------------------------------------------------------
 -- UTL_RAW schema
@@ -21,32 +22,37 @@ CREATE SCHEMA utl_raw;
 -- ---------------------------------------------------------------------------
 -- utl_raw.cast_to_raw
 --
--- Converts a VARCHAR2 value to RAW by reinterpreting its byte sequence
+-- Converts a character string to RAW by reinterpreting its byte sequence
 -- without any character-set conversion.
+--
+-- Accepts text, which is compatible with oracle.varchar2 via orafce's
+-- implicit cast, so both of these work:
+--   utl_raw.cast_to_raw('abc')
+--   utl_raw.cast_to_raw('abc'::varchar2)   -- requires oracle in search_path
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION utl_raw.cast_to_raw(c oracle.varchar2)
-RETURNS oracle.raw
+CREATE FUNCTION utl_raw.cast_to_raw(c text)
+RETURNS raw
 LANGUAGE c STRICT IMMUTABLE PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_cast_to_raw';
 
-COMMENT ON FUNCTION utl_raw.cast_to_raw(oracle.varchar2)
-IS 'Convert VARCHAR2 to RAW by reinterpreting its bytes';
+COMMENT ON FUNCTION utl_raw.cast_to_raw(text)
+IS 'Convert a string to RAW by reinterpreting its bytes';
 
 -- ---------------------------------------------------------------------------
 -- utl_raw.cast_to_varchar2
 --
--- Converts a RAW value to VARCHAR2 by reinterpreting its byte sequence
--- without any character-set conversion.
+-- Converts a RAW value to text by reinterpreting its byte sequence without
+-- any character-set conversion.
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION utl_raw.cast_to_varchar2(r oracle.raw)
-RETURNS oracle.varchar2
+CREATE FUNCTION utl_raw.cast_to_varchar2(r raw)
+RETURNS text
 LANGUAGE c STRICT IMMUTABLE PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_cast_to_varchar2';
 
-COMMENT ON FUNCTION utl_raw.cast_to_varchar2(oracle.raw)
-IS 'Convert RAW to VARCHAR2 by reinterpreting its bytes';
+COMMENT ON FUNCTION utl_raw.cast_to_varchar2(raw)
+IS 'Convert RAW to text by reinterpreting its bytes';
 
 -- ---------------------------------------------------------------------------
 -- utl_raw.length
@@ -54,12 +60,12 @@ IS 'Convert RAW to VARCHAR2 by reinterpreting its bytes';
 -- Returns the length of a RAW value in bytes.
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION utl_raw.length(r oracle.raw)
+CREATE FUNCTION utl_raw.length(r raw)
 RETURNS integer
 LANGUAGE c STRICT IMMUTABLE PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_length';
 
-COMMENT ON FUNCTION utl_raw.length(oracle.raw)
+COMMENT ON FUNCTION utl_raw.length(raw)
 IS 'Return the byte length of a RAW value';
 
 -- ---------------------------------------------------------------------------
@@ -68,31 +74,31 @@ IS 'Return the byte length of a RAW value';
 -- Returns a substring of a RAW value.
 --
 -- Oracle semantics:
---   pos  - 1-based start position; negative counts backward from end
---   len  - number of bytes to return; omit or NULL to return to end
+--   pos  - 1-based start position; negative values count backward from end
+--   len  - number of bytes to return; omit or NULL means "to the end"
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION utl_raw.substr(r oracle.raw, pos integer, len integer DEFAULT NULL)
-RETURNS oracle.raw
+CREATE FUNCTION utl_raw.substr(r raw, pos integer, len integer DEFAULT NULL)
+RETURNS raw
 LANGUAGE c PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_substr';
 
-COMMENT ON FUNCTION utl_raw.substr(oracle.raw, integer, integer)
+COMMENT ON FUNCTION utl_raw.substr(raw, integer, integer)
 IS 'Return a substring of a RAW value (Oracle-compatible semantics)';
 
 -- ---------------------------------------------------------------------------
 -- utl_raw.concat
 --
--- Concatenates up to 12 RAW values into a single RAW value.
--- NULL arguments are silently ignored.
+-- Concatenates multiple RAW values into a single RAW value.
+-- NULL arguments are silently ignored (Oracle behavior).
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION utl_raw.concat(VARIADIC raws oracle.raw[])
-RETURNS oracle.raw
+CREATE FUNCTION utl_raw.concat(VARIADIC raws raw[])
+RETURNS raw
 LANGUAGE c STRICT IMMUTABLE PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_concat';
 
-COMMENT ON FUNCTION utl_raw.concat(VARIADIC oracle.raw[])
+COMMENT ON FUNCTION utl_raw.concat(VARIADIC raw[])
 IS 'Concatenate multiple RAW values, ignoring NULLs';
 
 -- ---------------------------------------------------------------------------
@@ -103,10 +109,10 @@ IS 'Concatenate multiple RAW values, ignoring NULLs';
 -- PostgreSQL/iconv-style names (UTF8, GBK).
 -- ---------------------------------------------------------------------------
 
-CREATE FUNCTION utl_raw.convert(r oracle.raw, to_charset text, from_charset text)
-RETURNS oracle.raw
+CREATE FUNCTION utl_raw.convert(r raw, to_charset text, from_charset text)
+RETURNS raw
 LANGUAGE c STRICT PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_convert';
 
-COMMENT ON FUNCTION utl_raw.convert(oracle.raw, text, text)
+COMMENT ON FUNCTION utl_raw.convert(raw, text, text)
 IS 'Convert RAW data between character sets';
