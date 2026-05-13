@@ -413,38 +413,38 @@ SELECT utl_raw.cast_to_varchar2(
 -- ============================================================
 -- same encoding: no-op (ASCII is identical in all common encodings)
 SELECT utl_raw.convert('\x616263'::raw, 'UTF8', 'UTF8');
-   convert    
---------------
- \x6162637e10
+  convert
+-----------
+ \x616263
 (1 row)
 
 -- Oracle-style source name: AL32UTF8 maps to UTF8
 SELECT utl_raw.convert('\x616263'::raw, 'UTF8', 'AL32UTF8');
-   convert    
---------------
- \x6162637e10
+  convert
+-----------
+ \x616263
 (1 row)
 
 -- Oracle-style target name: ZHS16GBK maps to GBK
 -- 你 = U+4F60, UTF-8 = E4 BD A0, GBK = C4 E3
 SELECT utl_raw.convert('\xe4bda0'::raw, 'ZHS16GBK', 'UTF8');
- convert 
+ convert
 ---------
  \xc4e3
 (1 row)
 
 -- charset names are case-insensitive
 SELECT utl_raw.convert('\x616263'::raw, 'utf8', 'UTF8');
-   convert    
---------------
- \x6162637e10
+  convert
+-----------
+ \x616263
 (1 row)
 
 -- empty input → empty output
 SELECT utl_raw.convert('\x'::raw, 'UTF8', 'UTF8');
-   convert    
---------------
- \x7e7f7f7f10
+ convert
+---------
+ \x
 (1 row)
 
 -- NULL → NULL (STRICT)

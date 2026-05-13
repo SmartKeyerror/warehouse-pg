@@ -300,7 +300,13 @@ utl_raw_convert(PG_FUNCTION_ARGS)
 
 	dst = pg_do_encoding_conversion(src, srclen, src_enc, dst_enc);
 
-	dstlen = strlen((char *) dst);
+	/*
+	 * When src_enc == dst_enc, pg_do_encoding_conversion returns src itself
+	 * without allocating a new buffer.  src is not null-terminated (it's the
+	 * interior of a bytea varlena), so strlen() would read past the end.
+	 * Use srclen directly in that case.
+	 */
+	dstlen = (dst != src) ? strlen((char *) dst) : srclen;
 
 	result = (bytea *) palloc(VARHDRSZ + dstlen);
 	SET_VARSIZE(result, VARHDRSZ + dstlen);
