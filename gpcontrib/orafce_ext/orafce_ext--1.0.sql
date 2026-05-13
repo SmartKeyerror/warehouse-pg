@@ -3,6 +3,8 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION orafce_ext" to load this file. \quit
 
+SET search_path = oracle, public;
+
 -- ---------------------------------------------------------------------------
 -- RAW type
 --
@@ -95,7 +97,7 @@ IS 'Return a substring of a RAW value (Oracle-compatible semantics)';
 
 CREATE FUNCTION utl_raw.concat(VARIADIC raws raw[])
 RETURNS raw
-LANGUAGE c STRICT IMMUTABLE PARALLEL SAFE
+LANGUAGE c IMMUTABLE PARALLEL SAFE
 AS '$libdir/orafce_ext', 'utl_raw_concat';
 
 COMMENT ON FUNCTION utl_raw.concat(VARIADIC raw[])

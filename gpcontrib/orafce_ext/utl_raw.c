@@ -146,14 +146,22 @@ utl_raw_length(PG_FUNCTION_ARGS)
 Datum
 utl_raw_substr(PG_FUNCTION_ARGS)
 {
-	bytea	   *r = PG_GETARG_BYTEA_PP(0);
-	int32		pos = PG_GETARG_INT32(1);
+	bytea	   *r;
+	int32		pos;
 	bool		len_is_null = PG_ARGISNULL(2);
 	int32		len = len_is_null ? 0 : PG_GETARG_INT32(2);
-	int32		r_len = VARSIZE_ANY_EXHDR(r);
-	int32		start,
+	int32		r_len,
+				start,
 				count;
 	bytea	   *result;
+
+	/* NULL r or NULL pos → NULL result */
+	if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+		PG_RETURN_NULL();
+
+	r = PG_GETARG_BYTEA_PP(0);
+	pos = PG_GETARG_INT32(1);
+	r_len = VARSIZE_ANY_EXHDR(r);
 
 	if (r_len == 0)
 		ereport(ERROR,
@@ -199,7 +207,12 @@ utl_raw_substr(PG_FUNCTION_ARGS)
 Datum
 utl_raw_concat(PG_FUNCTION_ARGS)
 {
-	ArrayType  *arr = PG_GETARG_ARRAYTYPE_P(0);
+	ArrayType  *arr;
+
+	if (PG_ARGISNULL(0))
+		PG_RETURN_NULL();
+
+	arr = PG_GETARG_ARRAYTYPE_P(0);
 	Datum	   *elements;
 	bool	   *nulls;
 	int			nelems;
