@@ -38,7 +38,7 @@ ifeq "$(with_zstd)" "yes"
 endif
 $(call recurse,all install clean distclean, $(recurse_targets))
 
-all: gpcloud orafce
+all: gpcloud orafce orafce_ext
 
 gpcloud:
 	@if [ "$(enable_gpcloud)" = "yes" ]; then \
@@ -51,6 +51,11 @@ orafce:
 		$(MAKE) -C orafce NO_PGXS=true; \
 	fi
 
+orafce_ext: orafce
+	@if [ "$(enable_orafce)" = "yes" ]; then \
+		$(MAKE) -C orafce_ext NO_PGXS=true; \
+	fi
+
 install:
 	@if [ "$(enable_gpcloud)" = "yes" ]; then \
 		$(MAKE) -C gpcloud install && \
@@ -58,16 +63,19 @@ install:
 	fi
 	@if [ "$(enable_orafce)" = "yes" ]; then \
 		$(MAKE) -C orafce NO_PGXS=true install; \
+		$(MAKE) -C orafce_ext NO_PGXS=true install; \
 	fi
 
 clean:
 	if [ "$(enable_gpcloud)" = "yes" ]; then $(MAKE) -C gpcloud cleanall; fi
 	if [ "${enable_orafce}" = "yes" ]; then $(MAKE) -C orafce NO_PGXS=true clean; fi
+	if [ "${enable_orafce}" = "yes" ]; then $(MAKE) -C orafce_ext NO_PGXS=true clean; fi
 
 
 distclean:
 	if [ "$(enable_gpcloud)" = "yes" ]; then $(MAKE) -C gpcloud distclean; fi
 	if [ "${enable_orafce}" = "yes" ]; then $(MAKE) -C orafce NO_PGXS=true distclean; fi
+	if [ "${enable_orafce}" = "yes" ]; then $(MAKE) -C orafce_ext NO_PGXS=true distclean; fi
 
 installcheck:
 	$(MAKE) -C gp_internal_tools installcheck

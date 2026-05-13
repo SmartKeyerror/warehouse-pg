@@ -1,0 +1,6 @@
+# orafce_ext extension
+comment = 'Oracle compatibility extension providing the UTL_RAW package'
+default_version = '1.0'
+module_pathname = '$libdir/orafce_ext'
+requires = 'orafce'
+relocatable = false
